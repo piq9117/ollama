@@ -37,6 +37,7 @@ import (
 	"github.com/ollama/ollama/envconfig"
 	"github.com/ollama/ollama/format"
 	"github.com/ollama/ollama/fs/ggml"
+	ollama_openapi "github.com/ollama/ollama/generated"
 	internalcloud "github.com/ollama/ollama/internal/cloud"
 	"github.com/ollama/ollama/llm"
 	"github.com/ollama/ollama/logutil"
@@ -1644,6 +1645,285 @@ func allowedHostsMiddleware(addr net.Addr) gin.HandlerFunc {
 	}
 }
 
+type OllamaApiServer struct {
+	server *Server
+}
+
+func (s *OllamaApiServer) GetHealth(c *gin.Context) {
+	c.String(http.StatusOK, "Ollama is running")
+}
+
+func (s *OllamaApiServer) CheckHealth(c *gin.Context) {
+	c.String(http.StatusOK, "Ollama is running")
+}
+
+func (s *OllamaApiServer) HeadBlob(c *gin.Context, digest string) {
+	s.server.HeadBlobHandler(c)
+}
+
+func (s *OllamaApiServer) CreateBlob(c *gin.Context, digest string) {
+	s.server.CreateBlobHandler(c)
+}
+
+func (s *OllamaApiServer) GenerateChat(c *gin.Context) {
+	handlers := s.server.withInferenceRequestLogging("/api/chat", s.server.ChatHandler)
+	for _, handler := range handlers {
+		handler(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+}
+
+func (s *OllamaApiServer) CopyModel(c *gin.Context) {
+	s.server.CopyHandler(c)
+}
+
+func (s *OllamaApiServer) CreateModel(c *gin.Context) {
+	s.server.CreateHandler(c)
+}
+
+func (s *OllamaApiServer) DeleteModel(c *gin.Context) {
+	s.server.DeleteHandler(c)
+}
+
+func (s *OllamaApiServer) GenerateEmbedding(c *gin.Context) {
+	s.server.EmbedHandler(c)
+}
+
+func (s *OllamaApiServer) GenerateEmbeddingLegacy(c *gin.Context) {
+	s.server.EmbeddingsHandler(c)
+}
+
+func (s *OllamaApiServer) ModelRecommendationsExperimental(c *gin.Context) {
+	s.server.ModelRecommendationsExperimentalHandler(c)
+}
+
+func (s *OllamaApiServer) WebSearchExperimental(c *gin.Context) {
+	s.server.WebSearchExperimentalHandler(c)
+}
+
+func (s *OllamaApiServer) WebFetchExperimental(c *gin.Context) {
+	s.server.WebFetchExperimentalHandler(c)
+}
+
+func (s *OllamaApiServer) GenerateCompletion(c *gin.Context) {
+	handlers := s.server.withInferenceRequestLogging("/api/generate", s.server.GenerateHandler)
+	for _, handler := range handlers {
+		handler(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+}
+
+func (s *OllamaApiServer) Whoami(c *gin.Context) {
+	s.server.WhoamiHandler(c)
+}
+
+func (s *OllamaApiServer) ListRunningModels(c *gin.Context) {
+	s.server.PsHandler(c)
+}
+
+func (s *OllamaApiServer) PullModel(c *gin.Context) {
+	s.server.PullHandler(c)
+}
+
+func (s *OllamaApiServer) PushModel(c *gin.Context) {
+	s.server.PushHandler(c)
+}
+
+func (s *OllamaApiServer) ShowModel(c *gin.Context) {
+	s.server.ShowHandler(c)
+}
+
+func (s *OllamaApiServer) Signout(c *gin.Context) {
+	s.server.SignoutHandler(c)
+}
+
+func (s *OllamaApiServer) GetStatus(c *gin.Context) {
+	s.server.StatusHandler(c)
+}
+
+func (s *OllamaApiServer) ListLocalModels(c *gin.Context) {
+	s.server.ListHandler(c)
+}
+
+func (s *OllamaApiServer) HeadLocalModels(c *gin.Context) {
+	s.server.ListHandler(c)
+}
+
+func (s *OllamaApiServer) SignoutDeprecated(c *gin.Context, encodedKey string) {
+	s.server.SignoutHandler(c)
+}
+
+func (s *OllamaApiServer) GetVersion(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"version": version.Version})
+}
+
+func (s *OllamaApiServer) HeadVersion(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"version": version.Version})
+}
+
+func (s *OllamaApiServer) OpenaiAudioTranscriptions(c *gin.Context) {
+	handlers := []gin.HandlerFunc{
+		middleware.TranscriptionMiddleware(),
+		s.server.ChatHandler,
+	}
+
+	for _, handler := range handlers {
+		handler(c)
+
+		if c.IsAborted() {
+			return
+		}
+	}
+}
+
+func (s *OllamaApiServer) OpenaiChatCompletions(c *gin.Context) {
+	handlers := s.server.withInferenceRequestLogging(
+		"/v1/chat/completions",
+		cloudPassthroughMiddleware(cloudErrRemoteInferenceUnavailable),
+		middleware.CompletionsMiddleware(),
+		s.server.ChatHandler,
+	)
+
+	for _, handler := range handlers {
+		handler(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+}
+
+func (s *OllamaApiServer) OpenaiCompletions(c *gin.Context) {
+	handlers := s.server.withInferenceRequestLogging(
+		"/v1/completions",
+		cloudPassthroughMiddleware(cloudErrRemoteInferenceUnavailable),
+		s.server.GenerateHandler,
+	)
+
+	for _, handler := range handlers {
+		handler(c)
+
+		if c.IsAborted() {
+			return
+		}
+	}
+}
+
+func (s *OllamaApiServer) OpenaiEmbeddings(c *gin.Context) {
+	handlers := []gin.HandlerFunc{
+		cloudPassthroughMiddleware(cloudErrRemoteInferenceUnavailable),
+		middleware.EmbeddingsMiddleware(),
+		s.server.EmbedHandler,
+	}
+
+	for _, handler := range handlers {
+		handler(c)
+
+		if c.IsAborted() {
+			return
+		}
+	}
+}
+
+func (s *OllamaApiServer) OpenaiImageEdits(c *gin.Context) {
+	handlers := []gin.HandlerFunc{
+		cloudPassthroughMiddleware(cloudErrRemoteInferenceUnavailable),
+		middleware.ImageEditsMiddleware(),
+		s.server.GenerateHandler,
+	}
+
+	for _, handler := range handlers {
+		handler(c)
+
+		if c.IsAborted() {
+			return
+		}
+	}
+}
+
+func (s *OllamaApiServer) OpenaiImageGenerations(c *gin.Context) {
+	handlers := []gin.HandlerFunc{
+		cloudPassthroughMiddleware(cloudErrRemoteInferenceUnavailable),
+		middleware.ImageGenerationsMiddleware(),
+		s.server.GenerateHandler,
+	}
+
+	for _, handler := range handlers {
+		handler(c)
+
+		if c.IsAborted() {
+			return
+		}
+	}
+}
+
+func (s *OllamaApiServer) AnthropicMessages(c *gin.Context) {
+	handlers := s.server.withInferenceRequestLogging(
+		"/v1/messages",
+		cloudPassthroughMiddleware(cloudErrRemoteInferenceUnavailable),
+		middleware.AnthropicMessagesMiddleware(),
+		s.server.ChatHandler,
+	)
+
+	for _, handler := range handlers {
+		handler(c)
+
+		if c.IsAborted() {
+			return
+		}
+	}
+}
+
+func (s *OllamaApiServer) OpenaiListModels(c *gin.Context) {
+	handlers := []gin.HandlerFunc{
+		middleware.ListMiddleware(),
+		s.server.ListHandler,
+	}
+
+	for _, handler := range handlers {
+		handler(c)
+
+		if c.IsAborted() {
+			return
+		}
+	}
+}
+
+func (s *OllamaApiServer) OpenaiRetrieveModel(c *gin.Context, model string) {
+	handlers := []gin.HandlerFunc{
+		cloudModelPathPassthroughMiddleware(cloudErrRemoteModelDetailsUnavailable),
+		middleware.RetrieveMiddleware(),
+		s.server.ShowHandler,
+	}
+	for _, handler := range handlers {
+		handler(c)
+
+		if c.IsAborted() {
+			return
+		}
+	}
+}
+
+func (s *OllamaApiServer) OpenaiResponses(c *gin.Context) {
+	handlers := s.server.withInferenceRequestLogging(
+		"/v1/responses",
+		cloudPassthroughMiddleware(cloudErrRemoteInferenceUnavailable),
+		middleware.ResponsesMiddleware(),
+		s.server.ChatHandler,
+	)
+
+	for _, handler := range handlers {
+		handler(c)
+
+		if c.IsAborted() {
+			return
+		}
+	}
+}
+
 func (s *Server) GenerateRoutes(rc *ollama.Registry) (http.Handler, error) {
 	corsConfig := cors.DefaultConfig()
 	corsConfig.AllowWildcard = true
@@ -1679,60 +1959,8 @@ func (s *Server) GenerateRoutes(rc *ollama.Registry) (http.Handler, error) {
 		allowedHostsMiddleware(s.addr),
 	)
 
-	// General
-	r.HEAD("/", func(c *gin.Context) { c.String(http.StatusOK, "Ollama is running") })
-	r.GET("/", func(c *gin.Context) { c.String(http.StatusOK, "Ollama is running") })
-	r.HEAD("/api/version", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"version": version.Version}) })
-	r.GET("/api/version", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"version": version.Version}) })
-	r.GET("/api/status", s.StatusHandler)
-
-	// Local model cache management (new implementation is at end of function)
-	r.POST("/api/pull", s.PullHandler)
-	r.POST("/api/push", s.PushHandler)
-	r.HEAD("/api/tags", s.ListHandler)
-	r.GET("/api/tags", s.ListHandler)
-	r.POST("/api/show", s.ShowHandler)
-	r.DELETE("/api/delete", s.DeleteHandler)
-
-	r.POST("/api/me", s.WhoamiHandler)
-
-	r.POST("/api/signout", s.SignoutHandler)
-	// deprecated
-	r.DELETE("/api/user/keys/:encodedKey", s.SignoutHandler)
-
-	// Create
-	r.POST("/api/create", s.CreateHandler)
-	r.POST("/api/blobs/:digest", s.CreateBlobHandler)
-	r.HEAD("/api/blobs/:digest", s.HeadBlobHandler)
-	r.POST("/api/copy", s.CopyHandler)
-	r.POST("/api/experimental/web_search", s.WebSearchExperimentalHandler)
-	r.POST("/api/experimental/web_fetch", s.WebFetchExperimentalHandler)
-	r.GET("/api/experimental/model-recommendations", s.ModelRecommendationsExperimentalHandler)
-
-	// Inference
-	r.GET("/api/ps", s.PsHandler)
-	r.POST("/api/generate", s.withInferenceRequestLogging("/api/generate", s.GenerateHandler)...)
-	r.POST("/api/chat", s.withInferenceRequestLogging("/api/chat", s.ChatHandler)...)
-	r.POST("/api/embed", s.EmbedHandler)
-	r.POST("/api/embeddings", s.EmbeddingsHandler)
-
-	// Inference (OpenAI compatibility)
-	// TODO(cloud-stage-a): apply Modelfile overlay deltas for local models with cloud
-	// parents on v1 request families while preserving this explicit :cloud passthrough.
-	r.POST("/v1/chat/completions", s.withInferenceRequestLogging("/v1/chat/completions", cloudPassthroughMiddleware(cloudErrRemoteInferenceUnavailable), middleware.ChatMiddleware(), s.ChatHandler)...)
-	r.POST("/v1/completions", s.withInferenceRequestLogging("/v1/completions", cloudPassthroughMiddleware(cloudErrRemoteInferenceUnavailable), middleware.CompletionsMiddleware(), s.GenerateHandler)...)
-	r.POST("/v1/embeddings", cloudPassthroughMiddleware(cloudErrRemoteInferenceUnavailable), middleware.EmbeddingsMiddleware(), s.EmbedHandler)
-	r.GET("/v1/models", middleware.ListMiddleware(), s.ListHandler)
-	r.GET("/v1/models/:model", cloudModelPathPassthroughMiddleware(cloudErrRemoteModelDetailsUnavailable), middleware.RetrieveMiddleware(), s.ShowHandler)
-	r.POST("/v1/responses", s.withInferenceRequestLogging("/v1/responses", cloudPassthroughMiddleware(cloudErrRemoteInferenceUnavailable), middleware.ResponsesMiddleware(), s.ChatHandler)...)
-	// OpenAI-compatible image generation endpoints
-	r.POST("/v1/images/generations", cloudPassthroughMiddleware(cloudErrRemoteInferenceUnavailable), middleware.ImageGenerationsMiddleware(), s.GenerateHandler)
-	r.POST("/v1/images/edits", cloudPassthroughMiddleware(cloudErrRemoteInferenceUnavailable), middleware.ImageEditsMiddleware(), s.GenerateHandler)
-	// OpenAI-compatible audio endpoint
-	r.POST("/v1/audio/transcriptions", middleware.TranscriptionMiddleware(), s.ChatHandler)
-
-	// Inference (Anthropic compatibility)
-	r.POST("/v1/messages", s.withInferenceRequestLogging("/v1/messages", cloudPassthroughMiddleware(cloudErrRemoteInferenceUnavailable), middleware.AnthropicMessagesMiddleware(), s.ChatHandler)...)
+	openapiServer := &OllamaApiServer{server: s}
+	ollama_openapi.RegisterHandlers(r, openapiServer)
 
 	if rc != nil {
 		// wrap old with new
